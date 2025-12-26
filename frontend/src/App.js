@@ -93,6 +93,7 @@ function App() {
         const data = JSON.parse(event.data);
         
         if (data.type === 'frame') {
+          if (!hasFrames) setHasFrames(true);
           lastFrameRef.current = data.data;
           renderFrame(data.data);
         } else if (data.type === 'error') {
@@ -105,6 +106,7 @@ function App() {
     
     ws.onclose = () => {
       setIsConnected(false);
+      setHasFrames(false);
       console.log('WebSocket disconnected');
     };
     
