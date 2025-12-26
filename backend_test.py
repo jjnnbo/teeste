@@ -201,7 +201,7 @@ class MagoTraderAPITester:
             ws_thread.start()
             
             # Wait for connection and frames
-            max_wait = 15  # seconds
+            max_wait = 20  # seconds - increased for Google to load
             start_time = time.time()
             
             while time.time() - start_time < max_wait:
