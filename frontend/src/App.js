@@ -7,6 +7,8 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 const WS_URL = BACKEND_URL.replace(/^https?/, (match) => match === 'https' ? 'wss' : 'ws');
 
+console.log('Config:', { BACKEND_URL, API, WS_URL });
+
 function App() {
   const [sessionId, setSessionId] = useState(null);
   const [isConnecting, setIsConnecting] = useState(true);
