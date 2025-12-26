@@ -156,6 +156,7 @@ async def create_session(viewport_width: int = 1280, viewport_height: int = 720)
             await page.goto("https://pocketoption.com", wait_until="commit", timeout=60000)
         except Exception as nav_error:
             logger.warning(f"Navigation timeout, continuing anyway: {nav_error}")
+            # Continue with session creation even if navigation fails
         
         session = BrowserSession(session_id, page, context)
         session.viewport_width = viewport_width
@@ -167,8 +168,23 @@ async def create_session(viewport_width: int = 1280, viewport_height: int = 720)
         return {"session_id": session_id, "status": "created"}
     
     except Exception as e:
-        logger.error(f"Error creating session: {e}")
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        # Only return error for non-navigation issues
+        if "Page.goto" not in str(e):
+            logger.error(f"Error creating session: {e}")
+            return JSONResponse(status_code=500, content={"error": str(e)})
+        else:
+            # Navigation timeout - still create session
+            logger.warning(f"Navigation timeout during session creation, continuing: {e}")
+            try:
+                session = BrowserSession(session_id, page, context)
+                session.viewport_width = viewport_width
+                session.viewport_height = viewport_height
+                sessions[session_id] = session
+                logger.info(f"Created session {session_id} with viewport {viewport_width}x{viewport_height} (navigation timeout)")
+                return {"session_id": session_id, "status": "created"}
+            except Exception as session_error:
+                logger.error(f"Error creating session after navigation timeout: {session_error}")
+                return JSONResponse(status_code=500, content={"error": str(session_error)})
 
 @api_router.delete("/session/{session_id}")
 async def delete_session(session_id: str):
