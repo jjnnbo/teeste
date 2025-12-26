@@ -13,6 +13,7 @@ function App() {
   const [sessionId, setSessionId] = useState(null);
   const [isConnecting, setIsConnecting] = useState(true);
   const [isConnected, setIsConnected] = useState(false);
+  const [hasFrames, setHasFrames] = useState(false);
   const [error, setError] = useState(null);
   
   const canvasRef = useRef(null);
