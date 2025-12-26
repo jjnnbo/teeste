@@ -202,8 +202,8 @@ async def list_sessions():
         ]
     }
 
-# WebSocket for browser streaming and control
-@app.websocket("/ws/{session_id}")
+# WebSocket for browser streaming and control - using /api prefix for ingress
+@app.websocket("/api/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     await websocket.accept()
     
