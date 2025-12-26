@@ -160,7 +160,7 @@ async def create_session(viewport_width: int = 1280, viewport_height: int = 720)
         logger.info(f"Created session {session_id} with viewport {viewport_width}x{viewport_height}")
         
         # Start navigation in background (don't wait)
-        asyncio.create_task(navigate_session(session_id, "https://pocketoption.com"))
+        asyncio.create_task(navigate_session(session_id, "https://www.google.com"))
         
         return {"session_id": session_id, "status": "created"}
     
