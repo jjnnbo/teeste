@@ -61,7 +61,7 @@ function App() {
   const connectWebSocket = useCallback((sid) => {
     if (!sid) return;
     
-    const ws = new WebSocket(`${WS_URL}/ws/${sid}`);
+    const ws = new WebSocket(`${WS_URL}/api/ws/${sid}`);
     wsRef.current = ws;
     
     ws.onopen = () => {
