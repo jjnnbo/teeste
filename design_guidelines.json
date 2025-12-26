@@ -1,0 +1,164 @@
+{
+  "identity": {
+    "name": "Mago Trader",
+    "archetype": "The Invisible Hand",
+    "vibe": "Professional, Stealth, High-Frequency, Dark Mode Only",
+    "core_philosophy": "The interface should be invisible. The user is here to trade, not to admire the UI. The UI only exists to facilitate the connection to the market."
+  },
+  "typography": {
+    "primary_font": "Manrope",
+    "secondary_font": "JetBrains Mono",
+    "usage": {
+      "headings": "Manrope, font-bold, tracking-tight",
+      "body": "Manrope, font-medium, tracking-normal",
+      "data_numbers": "JetBrains Mono, font-medium, tracking-tight",
+      "code": "JetBrains Mono"
+    },
+    "scale": {
+      "h1": "text-4xl md:text-5xl lg:text-6xl",
+      "h2": "text-3xl md:text-4xl",
+      "h3": "text-2xl md:text-3xl",
+      "body": "text-base",
+      "small": "text-sm",
+      "tiny": "text-xs"
+    }
+  },
+  "colors": {
+    "mode": "dark",
+    "palette": {
+      "background": "#09090b",
+      "foreground": "#fafafa",
+      "card": "#18181b",
+      "card_foreground": "#fafafa",
+      "popover": "#09090b",
+      "popover_foreground": "#fafafa",
+      "primary": "#22c55e",
+      "primary_foreground": "#052e16",
+      "secondary": "#27272a",
+      "secondary_foreground": "#fafafa",
+      "muted": "#27272a",
+      "muted_foreground": "#a1a1aa",
+      "accent": "#27272a",
+      "accent_foreground": "#fafafa",
+      "destructive": "#ef4444",
+      "destructive_foreground": "#fafafa",
+      "border": "#27272a",
+      "input": "#27272a",
+      "ring": "#22c55e"
+    },
+    "semantic": {
+      "success": "#22c55e",
+      "warning": "#eab308",
+      "error": "#ef4444",
+      "info": "#3b82f6",
+      "profit": "#22c55e",
+      "loss": "#ef4444"
+    }
+  },
+  "layout": {
+    "container": "w-full h-screen overflow-hidden bg-background flex flex-col",
+    "header": {
+      "style": "fixed top-0 left-0 right-0 z-50 h-14 flex items-center justify-between px-4 border-b border-white/10 bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/60",
+      "logo_text": "font-bold text-lg tracking-tighter text-white"
+    },
+    "main_content": {
+      "style": "flex-1 relative w-full h-full pt-14",
+      "canvas_container": "w-full h-full relative bg-black"
+    },
+    "spacing": {
+      "page_padding": "p-4 md:p-6 lg:p-8",
+      "card_padding": "p-6",
+      "gap_default": "gap-4",
+      "gap_tight": "gap-2"
+    },
+    "z_index": {
+      "canvas": "z-0",
+      "overlays": "z-10",
+      "header": "z-50",
+      "modals": "z-50",
+      "toasts": "z-100"
+    }
+  },
+  "components": {
+    "radius": "rounded-sm",
+    "button": {
+      "default": "h-9 px-4 py-2 inline-flex items-center justify-center whitespace-nowrap rounded-sm text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+      "variants": {
+        "default": "bg-primary text-primary-foreground hover:bg-primary/90",
+        "destructive": "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+        "outline": "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
+        "secondary": "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        "ghost": "hover:bg-accent hover:text-accent-foreground",
+        "link": "text-primary underline-offset-4 hover:underline"
+      }
+    },
+    "card": {
+      "style": "rounded-sm border border-border bg-card text-card-foreground shadow-sm"
+    },
+    "input": {
+      "style": "flex h-9 w-full rounded-sm border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+    }
+  },
+  "assets": {
+    "images": [
+      {
+        "url": "https://images.unsplash.com/photo-1759159347827-de3a54002de7?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHw0fHxhYnN0cmFjdCUyMGRhcmslMjB0ZWNobm9sb2d5JTIwZ2VvbWV0cmljfGVufDB8fHx8MTc2NjcxNTAwMXww&ixlib=rb-4.1.0&q=85",
+        "category": "background",
+        "description": "Dark abstract geometric cubes with green glow, suitable for loading screens or auth pages."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1760978631939-32968f2e1813?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMGRhcmslMjB0ZWNobm9sb2d5JTIwZ2VvbWV0cmljfGVufDB8fHx8MTc2NjcxNTAwMXww&ixlib=rb-4.1.0&q=85",
+        "category": "texture",
+        "description": "Golden metallic spheres grid, good for premium/VIP section backgrounds."
+      }
+    ],
+    "icons": "lucide-react"
+  },
+  "motion": {
+    "transitions": {
+      "default": "transition-all duration-200 ease-in-out",
+      "fast": "transition-all duration-100 ease-out",
+      "slow": "transition-all duration-500 ease-in-out"
+    },
+    "animations": {
+      "fade_in": "animate-in fade-in duration-300",
+      "slide_up": "animate-in slide-in-from-bottom-4 duration-300 fade-in",
+      "pulse_subtle": "animate-pulse"
+    }
+  },
+  "accessibility": {
+    "contrast": "Ensure text is at least 4.5:1 against background. Use lighter grays for text on dark backgrounds.",
+    "focus": "Visible focus rings on all interactive elements.",
+    "aria": "Use aria-label for icon-only buttons."
+  },
+  "instructions_to_main_agent": [
+    "Implement the 'Mago Trader' header as a fixed, glassmorphism strip.",
+    "The main view is a full-screen canvas for the remote browser. Ensure it handles resize events gracefully.",
+    "Use the 'Manrope' font for all UI text and 'JetBrains Mono' for any numerical data or coordinates.",
+    "Ensure the mobile experience supports touch events passed to the canvas.",
+    "Use the provided dark theme colors in tailwind.config.js.",
+    "Do not use gradients for the main background; keep it solid dark or subtle texture to avoid video compression artifacts in the stream.",
+    "Use 'sonner' for all notifications (connection status, errors).",
+    "Add 'data-testid' to all interactive elements."
+  ],
+  "universal_guidelines": [
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients",
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "Create depth through layered design elements with z-index hierarchy",
+    "Use glass-morphism effects with backdrop filters (12-24px blur)",
+    "You MUST NOT apply universal transition. Eg: transition: all. This results in breaking transforms. Always add transitions for specific interactive elements like button, input excluding transforms",
+    "You MUST NOT center align the app container, ie do not add .App { text-align: center; } in the css file. This disrupts the human natural reading flow of text",
+    "Always use modern button styles like pill-shaped, or sharp button with interaction animations & color relevant to the app style",
+    "NEVER: use AI assistant Emoji characters like 🤖🧠💭💡🔮🎯📚🎭🎬🎪🎉🎊🎁🎀🎂🍰🎈🎨🎰💰💵💳🏦💎🪙💸🤑📊📈📉💹🔢🏆🥇 etc for icons.",
+    "Every interaction needs micro-animations - hover states, transitions, parallax effects, and entrance animations. Static = dead.",
+    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
+    "Subtle grain textures, noise overlays, custom cursors, selection states, and loading animations: separates good from extraordinary.",
+    "Main agent relies on these image URLs. Missing categories (especially sponsor logos) = main agent will use placeholder text which is FORBIDDEN",
+    "Prioritize using pre-existing components from src/components/ui when applicable",
+    "Create new components that match the style and conventions of existing components when needed",
+    "Examine existing components to understand the project's component patterns before creating new ones",
+    "Components MUST use named exports (export const ComponentName = ...)",
+    "Pages MUST use default exports (export default function PageName() {...})",
+    "Use 'sonner' for toasts. Sonner component are located in /app/src/components/ui/sonner.tsx"
+  ]
+}
