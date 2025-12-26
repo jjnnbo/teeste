@@ -312,6 +312,8 @@ function App() {
     }
     setSessionId(null);
     setIsConnected(false);
+    setHasFrames(false);
+    setIsConnecting(true);
     
     const sid = await createSession();
     if (sid) {
