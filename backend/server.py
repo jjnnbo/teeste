@@ -230,26 +230,33 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         while session.streaming:
             try:
                 if session.page and not session.page.is_closed():
-                    screenshot = await session.page.screenshot(
-                        type="jpeg",
-                        quality=60,
-                        full_page=False
-                    )
-                    screenshot_base64 = base64.b64encode(screenshot).decode('utf-8')
-                    
-                    await websocket.send_json({
-                        "type": "frame",
-                        "data": screenshot_base64
-                    })
+                    try:
+                        screenshot = await session.page.screenshot(
+                            type="jpeg",
+                            quality=50,
+                            full_page=False,
+                            timeout=5000  # 5 second timeout
+                        )
+                        screenshot_base64 = base64.b64encode(screenshot).decode('utf-8')
+                        
+                        await websocket.send_json({
+                            "type": "frame",
+                            "data": screenshot_base64
+                        })
+                    except Exception as screenshot_error:
+                        # Send a placeholder message if screenshot fails
+                        logger.debug(f"Screenshot failed: {screenshot_error}")
+                        await asyncio.sleep(0.5)
+                        continue
                 
-                # ~15 FPS for smooth experience
-                await asyncio.sleep(0.066)
+                # ~10 FPS for smooth experience
+                await asyncio.sleep(0.1)
             
             except WebSocketDisconnect:
                 break
             except Exception as e:
-                logger.error(f"Screenshot error: {e}")
-                await asyncio.sleep(0.1)
+                logger.error(f"Stream error: {e}")
+                await asyncio.sleep(0.5)
     
     session.stream_task = asyncio.create_task(stream_screenshots())
     
