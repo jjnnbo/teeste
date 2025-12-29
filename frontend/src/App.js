@@ -38,7 +38,7 @@ function App() {
   }, []);
 
   // Target URL
-  const TARGET_URL = "https://pocketoption.com/en/login";
+  const TARGET_URL = "https://www.google.com";
 
   // Render frame to canvas
   const renderFrame = useCallback((base64Data) => {
