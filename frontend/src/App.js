@@ -15,24 +15,29 @@ function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [hasFrames, setHasFrames] = useState(false);
   const [error, setError] = useState(null);
+  const [fps, setFps] = useState(0);
   
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
   const wsRef = useRef(null);
   const imageRef = useRef(new Image());
-  const lastFrameRef = useRef(null);
   const inputRef = useRef(null);
+  const frameCountRef = useRef(0);
+  const lastFpsUpdateRef = useRef(Date.now());
+  
+  // Track actual canvas dimensions for precise coordinate mapping
+  const canvasDimensionsRef = useRef({ width: 1280, height: 720 });
   
   // Get viewport dimensions
   const getViewportSize = useCallback(() => {
-    const headerHeight = 56; // h-14 = 56px
+    const headerHeight = 56;
     return {
-      width: window.innerWidth,
-      height: window.innerHeight - headerHeight
+      width: Math.floor(window.innerWidth),
+      height: Math.floor(window.innerHeight - headerHeight)
     };
   }, []);
 
-  // Target URL (can be configured)
+  // Target URL
   const TARGET_URL = "https://pocketoption.com/en/login";
 
   // Create session
@@ -94,8 +99,16 @@ function App() {
         
         if (data.type === 'frame') {
           if (!hasFrames) setHasFrames(true);
-          lastFrameRef.current = data.data;
           renderFrame(data.data);
+          
+          // FPS counter
+          frameCountRef.current++;
+          const now = Date.now();
+          if (now - lastFpsUpdateRef.current >= 1000) {
+            setFps(frameCountRef.current);
+            frameCountRef.current = 0;
+            lastFpsUpdateRef.current = now;
+          }
         } else if (data.type === 'error') {
           toast.error(data.message);
         }
@@ -115,21 +128,22 @@ function App() {
       setError('Erro de conexão');
       setIsConnected(false);
     };
-  }, [getViewportSize]);
+  }, [getViewportSize, hasFrames]);
 
-  // Render frame to canvas
+  // Render frame to canvas with exact dimensions
   const renderFrame = useCallback((base64Data) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: false });
     const img = imageRef.current;
     
     img.onload = () => {
-      // Match canvas to image size
+      // Update canvas to match image exactly
       if (canvas.width !== img.width || canvas.height !== img.height) {
         canvas.width = img.width;
         canvas.height = img.height;
+        canvasDimensionsRef.current = { width: img.width, height: img.height };
       }
       ctx.drawImage(img, 0, 0);
     };
@@ -137,21 +151,44 @@ function App() {
     img.src = `data:image/jpeg;base64,${base64Data}`;
   }, []);
 
-  // Calculate coordinates relative to browser viewport
+  // PRECISE coordinate calculation - critical for accurate clicks
   const getCoordinates = useCallback((e) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
+    const canvasWidth = canvasDimensionsRef.current.width;
+    const canvasHeight = canvasDimensionsRef.current.height;
     
-    const clientX = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
-    const clientY = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+    // Get the displayed size
+    const displayWidth = rect.width;
+    const displayHeight = rect.height;
     
+    // Calculate scale factors
+    const scaleX = canvasWidth / displayWidth;
+    const scaleY = canvasHeight / displayHeight;
+    
+    // Get client coordinates
+    let clientX, clientY;
+    if (e.touches && e.touches.length > 0) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else if (e.changedTouches && e.changedTouches.length > 0) {
+      clientX = e.changedTouches[0].clientX;
+      clientY = e.changedTouches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+    
+    // Calculate precise coordinates
+    const x = (clientX - rect.left) * scaleX;
+    const y = (clientY - rect.top) * scaleY;
+    
+    // Return with decimal precision for subpixel accuracy
     return {
-      x: Math.round((clientX - rect.left) * scaleX),
-      y: Math.round((clientY - rect.top) * scaleY)
+      x: Math.max(0, Math.min(canvasWidth, x)),
+      y: Math.max(0, Math.min(canvasHeight, y))
     };
   }, []);
 
@@ -162,14 +199,22 @@ function App() {
     }
   }, []);
 
-  // Mouse event handlers
+  // Mouse handlers with debounced mousemove
+  const lastMoveRef = useRef(0);
+  const MOVE_THROTTLE = 16; // ~60fps for mouse move
+  
   const handleMouseMove = useCallback((e) => {
+    const now = Date.now();
+    if (now - lastMoveRef.current < MOVE_THROTTLE) return;
+    lastMoveRef.current = now;
+    
     const coords = getCoordinates(e);
     sendEvent({ type: 'mousemove', ...coords });
   }, [getCoordinates, sendEvent]);
 
   const handleMouseDown = useCallback((e) => {
     e.preventDefault();
+    e.stopPropagation();
     const coords = getCoordinates(e);
     const button = e.button === 2 ? 'right' : 'left';
     sendEvent({ type: 'mousedown', ...coords, button });
@@ -177,6 +222,7 @@ function App() {
 
   const handleMouseUp = useCallback((e) => {
     e.preventDefault();
+    e.stopPropagation();
     const coords = getCoordinates(e);
     const button = e.button === 2 ? 'right' : 'left';
     sendEvent({ type: 'mouseup', ...coords, button });
@@ -184,7 +230,9 @@ function App() {
 
   const handleClick = useCallback((e) => {
     e.preventDefault();
+    e.stopPropagation();
     const coords = getCoordinates(e);
+    console.log('Click at:', coords);
     sendEvent({ type: 'click', ...coords, button: 'left' });
     
     // Focus hidden input for mobile keyboard
@@ -195,12 +243,14 @@ function App() {
 
   const handleDoubleClick = useCallback((e) => {
     e.preventDefault();
+    e.stopPropagation();
     const coords = getCoordinates(e);
     sendEvent({ type: 'dblclick', ...coords });
   }, [getCoordinates, sendEvent]);
 
   const handleContextMenu = useCallback((e) => {
     e.preventDefault();
+    e.stopPropagation();
     const coords = getCoordinates(e);
     sendEvent({ type: 'click', ...coords, button: 'right' });
   }, [getCoordinates, sendEvent]);
@@ -211,24 +261,22 @@ function App() {
     sendEvent({
       type: 'scroll',
       ...coords,
-      deltaX: e.deltaX,
-      deltaY: e.deltaY
+      deltaX: Math.round(e.deltaX),
+      deltaY: Math.round(e.deltaY)
     });
   }, [getCoordinates, sendEvent]);
 
-  // Touch event handlers
+  // Touch handlers with precise tracking
+  const touchStartRef = useRef({ x: 0, y: 0, time: 0 });
   const lastTouchRef = useRef({ x: 0, y: 0 });
   
   const handleTouchStart = useCallback((e) => {
     e.preventDefault();
-    const touch = e.touches[0];
-    if (touch) {
-      const coords = getCoordinates(e);
-      lastTouchRef.current = coords;
-      sendEvent({ type: 'mousedown', ...coords, button: 'left' });
-    }
+    const coords = getCoordinates(e);
+    touchStartRef.current = { ...coords, time: Date.now() };
+    lastTouchRef.current = coords;
+    sendEvent({ type: 'mousedown', ...coords, button: 'left' });
     
-    // Focus hidden input for mobile keyboard - this opens the keyboard!
     if (inputRef.current) {
       inputRef.current.focus();
     }
@@ -243,86 +291,96 @@ function App() {
 
   const handleTouchEnd = useCallback((e) => {
     e.preventDefault();
-    // Use last known touch position
     const coords = lastTouchRef.current;
-    sendEvent({ type: 'mouseup', ...coords, button: 'left' });
-    sendEvent({ type: 'click', ...coords, button: 'left' });
+    const startCoords = touchStartRef.current;
+    const elapsed = Date.now() - startCoords.time;
     
-    // Keep focus on input for keyboard
+    // Calculate distance moved
+    const dx = Math.abs(coords.x - startCoords.x);
+    const dy = Math.abs(coords.y - startCoords.y);
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    sendEvent({ type: 'mouseup', ...coords, button: 'left' });
+    
+    // Only send click if it was a tap (short duration, small movement)
+    if (elapsed < 300 && distance < 10) {
+      sendEvent({ type: 'click', ...coords, button: 'left' });
+    }
+    
     if (inputRef.current) {
       inputRef.current.focus();
     }
   }, [sendEvent]);
 
-  // Keyboard event handlers
+  // Keyboard handlers
   const handleKeyDown = useCallback((e) => {
-    // Don't prevent default for text input
     if (e.key.length === 1) {
-      sendEvent({ type: 'keypress', key: e.key });
+      sendEvent({ type: 'keypress', key: e.key, code: e.code });
     } else {
       e.preventDefault();
-      sendEvent({ type: 'keydown', key: e.key });
+      sendEvent({ type: 'keydown', key: e.key, code: e.code });
     }
   }, [sendEvent]);
 
   const handleKeyUp = useCallback((e) => {
     if (e.key.length > 1) {
-      sendEvent({ type: 'keyup', key: e.key });
+      sendEvent({ type: 'keyup', key: e.key, code: e.code });
     }
   }, [sendEvent]);
 
-  // Handle mobile input - captures each character typed on mobile keyboard
+  // Mobile input handler
   const handleInput = useCallback((e) => {
     const text = e.target.value;
     if (text) {
-      // Send each character
-      for (const char of text) {
-        sendEvent({ type: 'keypress', key: char });
-      }
+      sendEvent({ type: 'input', text });
       e.target.value = '';
     }
   }, [sendEvent]);
 
-  // Handle mobile keyboard special keys
   const handleMobileKeyDown = useCallback((e) => {
-    // Handle special keys like Backspace, Enter on mobile
     if (e.key === 'Backspace' || e.key === 'Enter' || e.key === 'Tab') {
       e.preventDefault();
-      sendEvent({ type: 'keydown', key: e.key });
+      sendEvent({ type: 'keydown', key: e.key, code: e.code });
     }
   }, [sendEvent]);
 
-  // Handle resize
+  // Handle resize with debounce
   useEffect(() => {
+    let resizeTimeout;
     const handleResize = () => {
-      const { width, height } = getViewportSize();
-      sendEvent({ type: 'resize', width, height });
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        const { width, height } = getViewportSize();
+        sendEvent({ type: 'resize', width, height });
+      }, 100);
     };
     
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      clearTimeout(resizeTimeout);
+    };
   }, [getViewportSize, sendEvent]);
 
-  // Global keyboard listener when connected
+  // Global keyboard listener
   useEffect(() => {
     if (!isConnected) return;
     
     const handleGlobalKeyDown = (e) => {
-      // Only handle if not in an input field
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       
       e.preventDefault();
       if (e.key.length === 1) {
-        sendEvent({ type: 'keypress', key: e.key });
+        sendEvent({ type: 'keypress', key: e.key, code: e.code });
       } else {
-        sendEvent({ type: 'keydown', key: e.key });
+        sendEvent({ type: 'keydown', key: e.key, code: e.code });
       }
     };
     
     const handleGlobalKeyUp = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       if (e.key.length > 1) {
-        sendEvent({ type: 'keyup', key: e.key });
+        sendEvent({ type: 'keyup', key: e.key, code: e.code });
       }
     };
     
@@ -335,7 +393,7 @@ function App() {
     };
   }, [isConnected, sendEvent]);
 
-  // Initialize session on mount
+  // Initialize session
   useEffect(() => {
     let mounted = true;
     
@@ -356,7 +414,7 @@ function App() {
     };
   }, [createSession, connectWebSocket]);
 
-  // Handle refresh
+  // Refresh handler
   const handleRefresh = useCallback(async () => {
     if (wsRef.current) {
       wsRef.current.close();
@@ -365,6 +423,7 @@ function App() {
     setIsConnected(false);
     setHasFrames(false);
     setIsConnecting(true);
+    setFps(0);
     
     const sid = await createSession();
     if (sid) {
@@ -384,6 +443,13 @@ function App() {
         </div>
         
         <div className="header-actions">
+          {/* FPS Counter */}
+          {isConnected && (
+            <div className="fps-counter" data-testid="fps-counter">
+              {fps} FPS
+            </div>
+          )}
+          
           <button
             className="refresh-btn"
             onClick={handleRefresh}
@@ -412,7 +478,7 @@ function App() {
           </div>
         )}
         
-        {/* Site Loading State - Connected but no frames yet */}
+        {/* Site Loading State */}
         {isConnected && !hasFrames && !isConnecting && (
           <div className="loading-overlay site-loading" data-testid="site-loading-overlay">
             <div className="loading-content">
@@ -440,7 +506,7 @@ function App() {
           </div>
         )}
         
-        {/* Browser Canvas */}
+        {/* Browser Canvas - with precise event handling */}
         <canvas
           ref={canvasRef}
           className="browser-canvas"
@@ -458,9 +524,10 @@ function App() {
           onKeyDown={handleKeyDown}
           onKeyUp={handleKeyUp}
           tabIndex={0}
+          style={{ touchAction: 'none' }}
         />
         
-        {/* Hidden input for mobile keyboard - positioned to capture touch focus */}
+        {/* Hidden input for mobile keyboard */}
         <input
           ref={inputRef}
           type="text"
