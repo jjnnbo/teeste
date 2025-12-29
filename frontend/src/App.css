@@ -84,6 +84,21 @@ html, body, #root {
   gap: 12px;
 }
 
+/* FPS Counter */
+.fps-counter {
+  display: flex;
+  align-items: center;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-green);
+  background: rgba(34, 197, 94, 0.1);
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  min-width: 60px;
+  justify-content: center;
+}
+
 .refresh-btn {
   display: flex;
   align-items: center;
