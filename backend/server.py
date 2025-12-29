@@ -229,51 +229,64 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     
     # Start screenshot streaming task - optimized for low latency
     async def stream_screenshots():
-        fps_target = 20  # 20 FPS for stability over network
+        fps_target = 15  # 15 FPS for heavy pages
         frame_time = 1.0 / fps_target
         error_count = 0
+        last_frame_time = 0
+        
+        # Wait a bit for page to start loading
+        await asyncio.sleep(1)
         
         while session.streaming:
             try:
-                start_time = asyncio.get_event_loop().time()
+                current_time = asyncio.get_event_loop().time()
+                
+                # Throttle frame capture
+                if current_time - last_frame_time < frame_time:
+                    await asyncio.sleep(0.01)
+                    continue
                 
                 if session.page and not session.page.is_closed():
-                    # Take screenshot with lower quality for faster transfer
-                    screenshot = await session.page.screenshot(
-                        type="jpeg",
-                        quality=50,  # Lower quality = smaller size = faster transfer
-                        full_page=False,
-                        timeout=2000
-                    )
-                    screenshot_base64 = base64.b64encode(screenshot).decode('utf-8')
-                    
-                    if session.websocket:
-                        try:
+                    try:
+                        # Take screenshot with longer timeout for heavy pages
+                        screenshot = await session.page.screenshot(
+                            type="jpeg",
+                            quality=50,
+                            full_page=False,
+                            timeout=10000  # 10 seconds for heavy pages
+                        )
+                        screenshot_base64 = base64.b64encode(screenshot).decode('utf-8')
+                        
+                        if session.websocket:
                             await session.websocket.send_json({
                                 "type": "frame",
                                 "data": screenshot_base64
                             })
                             session.frame_count += 1
-                            error_count = 0  # Reset on success
-                        except Exception as send_err:
-                            error_count += 1
-                            logger.warning(f"Failed to send frame: {send_err}")
-                            if error_count > 5:
-                                logger.error("Too many send errors, stopping stream")
-                                break
+                            error_count = 0
+                            last_frame_time = current_time
+                            
+                    except Exception as screenshot_err:
+                        error_count += 1
+                        if "Timeout" in str(screenshot_err):
+                            logger.debug(f"Screenshot timeout, page still loading...")
+                            await asyncio.sleep(0.5)
+                        else:
+                            logger.warning(f"Screenshot error: {screenshot_err}")
+                        
+                        if error_count > 30:
+                            logger.error("Too many errors, stopping stream")
+                            break
                 
-                # Calculate sleep time for target FPS
-                elapsed = asyncio.get_event_loop().time() - start_time
-                sleep_time = max(0.001, frame_time - elapsed)
-                await asyncio.sleep(sleep_time)
+                await asyncio.sleep(0.01)
                 
             except WebSocketDisconnect:
                 logger.info("WebSocket disconnected during streaming")
                 break
             except Exception as e:
-                logger.warning(f"Stream frame error: {e}")
+                logger.warning(f"Stream error: {e}")
                 error_count += 1
-                if error_count > 10:
+                if error_count > 30:
                     break
                 await asyncio.sleep(0.1)
     
