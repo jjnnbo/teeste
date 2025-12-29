@@ -345,7 +345,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         session.websocket = None
 
 async def handle_browser_event(session: BrowserSession, event: dict):
-    """Handle browser events with CDP for precise control"""
+    """Handle browser events with natural, human-like interactions"""
     try:
         page = session.page
         cdp = session.cdp_session
@@ -356,13 +356,19 @@ async def handle_browser_event(session: BrowserSession, event: dict):
             y = float(event.get("y", 0))
             button = event.get("button", "left")
             
+            # Natural click sequence with proper timing
             try:
+                # 1. Move mouse to position smoothly
                 await cdp.send("Input.dispatchMouseEvent", {
                     "type": "mouseMoved",
                     "x": x,
                     "y": y
                 })
-                await asyncio.sleep(0.02)
+                
+                # 2. Small delay like human would have
+                await asyncio.sleep(0.03)
+                
+                # 3. Press mouse button
                 await cdp.send("Input.dispatchMouseEvent", {
                     "type": "mousePressed",
                     "x": x,
@@ -370,7 +376,11 @@ async def handle_browser_event(session: BrowserSession, event: dict):
                     "button": button,
                     "clickCount": 1
                 })
-                await asyncio.sleep(0.05)
+                
+                # 4. Hold for natural duration (50-100ms like human)
+                await asyncio.sleep(0.08)
+                
+                # 5. Release mouse button
                 await cdp.send("Input.dispatchMouseEvent", {
                     "type": "mouseReleased",
                     "x": x,
@@ -378,17 +388,38 @@ async def handle_browser_event(session: BrowserSession, event: dict):
                     "button": button,
                     "clickCount": 1
                 })
+                
             except Exception as e:
-                await page.mouse.click(x, y, button=button, delay=50)
+                logger.debug(f"CDP click failed: {e}")
+                await page.mouse.click(x, y, button=button, delay=80)
         
         elif event_type == "dblclick":
             x = float(event.get("x", 0))
             y = float(event.get("y", 0))
             try:
+                # Move to position
+                await cdp.send("Input.dispatchMouseEvent", {
+                    "type": "mouseMoved", "x": x, "y": y
+                })
+                await asyncio.sleep(0.02)
+                
+                # First click
+                await cdp.send("Input.dispatchMouseEvent", {
+                    "type": "mousePressed", "x": x, "y": y, "button": "left", "clickCount": 1
+                })
+                await asyncio.sleep(0.05)
+                await cdp.send("Input.dispatchMouseEvent", {
+                    "type": "mouseReleased", "x": x, "y": y, "button": "left", "clickCount": 1
+                })
+                
+                # Short delay between clicks
+                await asyncio.sleep(0.1)
+                
+                # Second click
                 await cdp.send("Input.dispatchMouseEvent", {
                     "type": "mousePressed", "x": x, "y": y, "button": "left", "clickCount": 2
                 })
-                await asyncio.sleep(0.03)
+                await asyncio.sleep(0.05)
                 await cdp.send("Input.dispatchMouseEvent", {
                     "type": "mouseReleased", "x": x, "y": y, "button": "left", "clickCount": 2
                 })
@@ -400,6 +431,10 @@ async def handle_browser_event(session: BrowserSession, event: dict):
             y = float(event.get("y", 0))
             button = event.get("button", "left")
             try:
+                await cdp.send("Input.dispatchMouseEvent", {
+                    "type": "mouseMoved", "x": x, "y": y
+                })
+                await asyncio.sleep(0.01)
                 await cdp.send("Input.dispatchMouseEvent", {
                     "type": "mousePressed", "x": x, "y": y, "button": button, "clickCount": 1
                 })
@@ -479,7 +514,7 @@ async def handle_browser_event(session: BrowserSession, event: dict):
                     await cdp.send("Input.dispatchTouchEvent", {
                         "type": "touchStart", "touchPoints": [{"x": x, "y": y}]
                     })
-                    await asyncio.sleep(0.05)
+                    await asyncio.sleep(0.08)
                     await cdp.send("Input.dispatchTouchEvent", {
                         "type": "touchEnd", "touchPoints": []
                     })
