@@ -46,8 +46,9 @@ class BrowserSession:
         self.streaming = False
         self.viewport_width = 1280
         self.viewport_height = 720
-        self.frame_queue = asyncio.Queue(maxsize=3)  # Buffer for frames
-        self.screencast_started = False
+        self.use_cdp_screencast = True
+        self.frame_count = 0
+        self.stream_task: Optional[asyncio.Task] = None
 
 sessions: Dict[str, BrowserSession] = {}
 
@@ -59,7 +60,7 @@ async def cleanup_sessions():
         to_remove = []
         for session_id, session in sessions.items():
             inactive_time = (now - session.last_activity).total_seconds()
-            if inactive_time > 300:  # 5 minutes timeout
+            if inactive_time > 300:
                 to_remove.append(session_id)
         
         for session_id in to_remove:
@@ -70,9 +71,10 @@ async def close_session(session_id: str):
     if session_id in sessions:
         session = sessions[session_id]
         session.streaming = False
+        if session.stream_task:
+            session.stream_task.cancel()
         try:
-            # Stop screencast
-            if session.screencast_started and session.cdp_session:
+            if session.cdp_session:
                 try:
                     await session.cdp_session.send("Page.stopScreencast")
                 except:
@@ -87,7 +89,6 @@ async def close_session(session_id: str):
 async def lifespan(app: FastAPI):
     global playwright_instance, browser_instance
     
-    # Startup
     logger.info("Starting Playwright...")
     playwright_instance = await async_playwright().start()
     browser_instance = await playwright_instance.chromium.launch(
@@ -99,8 +100,6 @@ async def lifespan(app: FastAPI):
             '--disable-gpu',
             '--disable-web-security',
             '--disable-features=IsolateOrigins,site-per-process',
-            '--enable-features=NetworkService,NetworkServiceInProcess',
-            '--force-color-profile=srgb',
             '--disable-background-timer-throttling',
             '--disable-backgrounding-occluded-windows',
             '--disable-renderer-backgrounding',
@@ -108,12 +107,10 @@ async def lifespan(app: FastAPI):
     )
     logger.info("Playwright browser started")
     
-    # Start cleanup task
     cleanup_task = asyncio.create_task(cleanup_sessions())
     
     yield
     
-    # Shutdown
     cleanup_task.cancel()
     
     for session_id in list(sessions.keys()):
@@ -126,10 +123,7 @@ async def lifespan(app: FastAPI):
     client.close()
     logger.info("Playwright shutdown complete")
 
-# Create the main app with lifespan
 app = FastAPI(lifespan=lifespan)
-
-# Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
 @api_router.get("/")
@@ -146,7 +140,6 @@ async def create_session(
     viewport_height: int = 720,
     start_url: str = "https://pocketoption.com"
 ):
-    """Create a new browser session with CDP support"""
     global browser_instance
     
     if not browser_instance:
@@ -155,7 +148,6 @@ async def create_session(
     session_id = str(uuid.uuid4())
     
     try:
-        # Create browser context with viewport
         context = await browser_instance.new_context(
             viewport={"width": viewport_width, "height": viewport_height},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -164,23 +156,17 @@ async def create_session(
             ignore_https_errors=True,
             java_script_enabled=True,
             has_touch=True,
-            is_mobile=False,
         )
         
         page = await context.new_page()
-        
-        # Get CDP session for screencast
         cdp_session = await context.new_cdp_session(page)
         
-        # Create session
         session = BrowserSession(session_id, page, context, cdp_session)
         session.viewport_width = viewport_width
         session.viewport_height = viewport_height
         sessions[session_id] = session
         
-        logger.info(f"Created session {session_id} with viewport {viewport_width}x{viewport_height}")
-        
-        # Start navigation in background
+        logger.info(f"Created session {session_id}")
         asyncio.create_task(navigate_session(session_id, start_url))
         
         return {"session_id": session_id, "status": "created"}
@@ -195,7 +181,6 @@ async def create_session(
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 async def navigate_session(session_id: str, url: str):
-    """Navigate session to URL in background"""
     if session_id not in sessions:
         return
     
@@ -208,7 +193,6 @@ async def navigate_session(session_id: str, url: str):
 
 @api_router.delete("/session/{session_id}")
 async def delete_session(session_id: str):
-    """Delete a browser session"""
     if session_id in sessions:
         await close_session(session_id)
         return {"status": "deleted"}
@@ -216,7 +200,6 @@ async def delete_session(session_id: str):
 
 @api_router.get("/sessions")
 async def list_sessions():
-    """List active sessions"""
     return {
         "count": len(sessions),
         "sessions": [
@@ -229,7 +212,6 @@ async def list_sessions():
         ]
     }
 
-# WebSocket for browser streaming and control
 @app.websocket("/api/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     await websocket.accept()
@@ -245,52 +227,44 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     
     logger.info(f"WebSocket connected for session {session_id}")
     
-    # Setup CDP Screencast handler
-    async def on_screencast_frame(params):
-        """Handle incoming screencast frames from CDP"""
-        if not session.streaming:
-            return
+    # Start screenshot streaming task - more reliable than CDP screencast
+    async def stream_screenshots():
+        fps_target = 30  # 30 FPS for good balance
+        frame_time = 1.0 / fps_target
         
-        try:
-            frame_data = params.get("data", "")
-            session_id_param = params.get("sessionId", 0)
-            
-            # Acknowledge frame immediately for smooth streaming
+        while session.streaming:
             try:
-                await session.cdp_session.send("Page.screencastFrameAck", {"sessionId": session_id_param})
-            except:
-                pass
-            
-            # Send frame to client
-            if session.websocket and frame_data:
-                try:
-                    await session.websocket.send_json({
-                        "type": "frame",
-                        "data": frame_data
-                    })
-                except:
-                    pass
-        except Exception as e:
-            logger.debug(f"Frame handling error: {e}")
+                start_time = asyncio.get_event_loop().time()
+                
+                if session.page and not session.page.is_closed():
+                    # Take screenshot with optimized settings
+                    screenshot = await session.page.screenshot(
+                        type="jpeg",
+                        quality=70,
+                        full_page=False,
+                        timeout=3000
+                    )
+                    screenshot_base64 = base64.b64encode(screenshot).decode('utf-8')
+                    
+                    if session.websocket:
+                        await session.websocket.send_json({
+                            "type": "frame",
+                            "data": screenshot_base64
+                        })
+                        session.frame_count += 1
+                
+                # Calculate sleep time for target FPS
+                elapsed = asyncio.get_event_loop().time() - start_time
+                sleep_time = max(0.001, frame_time - elapsed)
+                await asyncio.sleep(sleep_time)
+                
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                logger.debug(f"Stream frame error: {e}")
+                await asyncio.sleep(0.1)
     
-    # Subscribe to screencast frames
-    session.cdp_session.on("Page.screencastFrame", on_screencast_frame)
-    
-    # Start CDP Screencast at 60 FPS
-    try:
-        await session.cdp_session.send("Page.startScreencast", {
-            "format": "jpeg",
-            "quality": 80,  # Higher quality for better visuals
-            "maxWidth": session.viewport_width,
-            "maxHeight": session.viewport_height,
-            "everyNthFrame": 1  # Every frame = 60 FPS
-        })
-        session.screencast_started = True
-        logger.info(f"CDP Screencast started for session {session_id}")
-    except Exception as e:
-        logger.error(f"Failed to start screencast: {e}")
-        # Fallback to screenshot method
-        asyncio.create_task(fallback_screenshot_stream(session))
+    session.stream_task = asyncio.create_task(stream_screenshots())
     
     try:
         while True:
@@ -305,42 +279,15 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         logger.error(f"WebSocket error: {e}")
     finally:
         session.streaming = False
-        session.screencast_started = False
-        try:
-            await session.cdp_session.send("Page.stopScreencast")
-        except:
-            pass
+        if session.stream_task:
+            session.stream_task.cancel()
         session.websocket = None
 
-async def fallback_screenshot_stream(session: BrowserSession):
-    """Fallback to screenshot streaming if CDP fails"""
-    logger.info("Using fallback screenshot streaming")
-    while session.streaming:
-        try:
-            if session.page and not session.page.is_closed():
-                screenshot = await session.page.screenshot(
-                    type="jpeg",
-                    quality=80,
-                    full_page=False,
-                    timeout=5000
-                )
-                screenshot_base64 = base64.b64encode(screenshot).decode('utf-8')
-                
-                if session.websocket:
-                    await session.websocket.send_json({
-                        "type": "frame",
-                        "data": screenshot_base64
-                    })
-            
-            await asyncio.sleep(0.016)  # ~60 FPS
-        except Exception as e:
-            logger.debug(f"Fallback stream error: {e}")
-            await asyncio.sleep(0.1)
-
 async def handle_browser_event(session: BrowserSession, event: dict):
-    """Handle browser events with precise click handling"""
+    """Handle browser events with precise click handling using CDP"""
     try:
         page = session.page
+        cdp = session.cdp_session
         event_type = event.get("type")
         
         if event_type == "click":
@@ -348,26 +295,37 @@ async def handle_browser_event(session: BrowserSession, event: dict):
             y = float(event.get("y", 0))
             button = event.get("button", "left")
             
-            # Use CDP for more precise clicking
+            # Use CDP for precise clicking
             try:
-                await session.cdp_session.send("Input.dispatchMouseEvent", {
+                # Move to position first
+                await cdp.send("Input.dispatchMouseEvent", {
+                    "type": "mouseMoved",
+                    "x": x,
+                    "y": y
+                })
+                await asyncio.sleep(0.01)
+                
+                # Mouse down
+                await cdp.send("Input.dispatchMouseEvent", {
                     "type": "mousePressed",
                     "x": x,
                     "y": y,
                     "button": button,
                     "clickCount": 1
                 })
-                await asyncio.sleep(0.05)  # Small delay for click registration
-                await session.cdp_session.send("Input.dispatchMouseEvent", {
+                await asyncio.sleep(0.05)
+                
+                # Mouse up
+                await cdp.send("Input.dispatchMouseEvent", {
                     "type": "mouseReleased",
                     "x": x,
                     "y": y,
                     "button": button,
                     "clickCount": 1
                 })
+                logger.info(f"CDP click at ({x}, {y})")
             except Exception as e:
-                # Fallback to Playwright
-                logger.debug(f"CDP click failed, using Playwright: {e}")
+                logger.warning(f"CDP click failed, using Playwright: {e}")
                 await page.mouse.click(x, y, button=button, delay=50)
         
         elif event_type == "dblclick":
@@ -375,7 +333,7 @@ async def handle_browser_event(session: BrowserSession, event: dict):
             y = float(event.get("y", 0))
             
             try:
-                await session.cdp_session.send("Input.dispatchMouseEvent", {
+                await cdp.send("Input.dispatchMouseEvent", {
                     "type": "mousePressed",
                     "x": x,
                     "y": y,
@@ -383,7 +341,7 @@ async def handle_browser_event(session: BrowserSession, event: dict):
                     "clickCount": 2
                 })
                 await asyncio.sleep(0.03)
-                await session.cdp_session.send("Input.dispatchMouseEvent", {
+                await cdp.send("Input.dispatchMouseEvent", {
                     "type": "mouseReleased",
                     "x": x,
                     "y": y,
@@ -399,7 +357,7 @@ async def handle_browser_event(session: BrowserSession, event: dict):
             button = event.get("button", "left")
             
             try:
-                await session.cdp_session.send("Input.dispatchMouseEvent", {
+                await cdp.send("Input.dispatchMouseEvent", {
                     "type": "mousePressed",
                     "x": x,
                     "y": y,
@@ -416,7 +374,7 @@ async def handle_browser_event(session: BrowserSession, event: dict):
             button = event.get("button", "left")
             
             try:
-                await session.cdp_session.send("Input.dispatchMouseEvent", {
+                await cdp.send("Input.dispatchMouseEvent", {
                     "type": "mouseReleased",
                     "x": x,
                     "y": y,
@@ -432,11 +390,10 @@ async def handle_browser_event(session: BrowserSession, event: dict):
             y = float(event.get("y", 0))
             
             try:
-                await session.cdp_session.send("Input.dispatchMouseEvent", {
+                await cdp.send("Input.dispatchMouseEvent", {
                     "type": "mouseMoved",
                     "x": x,
-                    "y": y,
-                    "button": "none"
+                    "y": y
                 })
             except:
                 await page.mouse.move(x, y)
@@ -448,7 +405,7 @@ async def handle_browser_event(session: BrowserSession, event: dict):
             delta_y = event.get("deltaY", 0)
             
             try:
-                await session.cdp_session.send("Input.dispatchMouseEvent", {
+                await cdp.send("Input.dispatchMouseEvent", {
                     "type": "mouseWheel",
                     "x": x,
                     "y": y,
@@ -473,7 +430,7 @@ async def handle_browser_event(session: BrowserSession, event: dict):
             key = event.get("key", "")
             if len(key) == 1:
                 try:
-                    await session.cdp_session.send("Input.dispatchKeyEvent", {
+                    await cdp.send("Input.dispatchKeyEvent", {
                         "type": "char",
                         "text": key
                     })
@@ -485,7 +442,7 @@ async def handle_browser_event(session: BrowserSession, event: dict):
             if text:
                 for char in text:
                     try:
-                        await session.cdp_session.send("Input.dispatchKeyEvent", {
+                        await cdp.send("Input.dispatchKeyEvent", {
                             "type": "char",
                             "text": char
                         })
@@ -500,30 +457,18 @@ async def handle_browser_event(session: BrowserSession, event: dict):
                 x = float(touches[0].get("x", 0))
                 y = float(touches[0].get("y", 0))
                 
-                # Use touch events via CDP
                 try:
-                    await session.cdp_session.send("Input.dispatchTouchEvent", {
+                    await cdp.send("Input.dispatchTouchEvent", {
                         "type": "touchStart",
                         "touchPoints": [{"x": x, "y": y}]
                     })
                     await asyncio.sleep(0.05)
-                    await session.cdp_session.send("Input.dispatchTouchEvent", {
+                    await cdp.send("Input.dispatchTouchEvent", {
                         "type": "touchEnd",
                         "touchPoints": []
                     })
                 except:
                     await page.mouse.click(x, y)
-            
-            elif action == "move" and touches:
-                x = float(touches[0].get("x", 0))
-                y = float(touches[0].get("y", 0))
-                try:
-                    await session.cdp_session.send("Input.dispatchTouchEvent", {
-                        "type": "touchMove",
-                        "touchPoints": [{"x": x, "y": y}]
-                    })
-                except:
-                    await page.mouse.move(x, y)
         
         elif event_type == "resize":
             width = event.get("width", 1280)
@@ -531,20 +476,6 @@ async def handle_browser_event(session: BrowserSession, event: dict):
             session.viewport_width = width
             session.viewport_height = height
             await page.set_viewport_size({"width": width, "height": height})
-            
-            # Restart screencast with new dimensions
-            if session.screencast_started:
-                try:
-                    await session.cdp_session.send("Page.stopScreencast")
-                    await session.cdp_session.send("Page.startScreencast", {
-                        "format": "jpeg",
-                        "quality": 80,
-                        "maxWidth": width,
-                        "maxHeight": height,
-                        "everyNthFrame": 1
-                    })
-                except:
-                    pass
         
         elif event_type == "navigate":
             url = event.get("url", "")
@@ -564,8 +495,7 @@ async def handle_browser_event(session: BrowserSession, event: dict):
         logger.error(f"Error handling event {event.get('type')}: {e}")
 
 async def handle_key_event_cdp(session: BrowserSession, key: str, code: str, event_type: str):
-    """Handle keyboard events with CDP for better compatibility"""
-    # Map special keys to CDP format
+    """Handle keyboard events with CDP"""
     key_map = {
         "Backspace": {"key": "Backspace", "code": "Backspace", "keyCode": 8},
         "Tab": {"key": "Tab", "code": "Tab", "keyCode": 9},
@@ -581,10 +511,6 @@ async def handle_key_event_cdp(session: BrowserSession, key: str, code: str, eve
         "ArrowLeft": {"key": "ArrowLeft", "code": "ArrowLeft", "keyCode": 37},
         "ArrowRight": {"key": "ArrowRight", "code": "ArrowRight", "keyCode": 39},
         "Delete": {"key": "Delete", "code": "Delete", "keyCode": 46},
-        "Home": {"key": "Home", "code": "Home", "keyCode": 36},
-        "End": {"key": "End", "code": "End", "keyCode": 35},
-        "PageUp": {"key": "PageUp", "code": "PageUp", "keyCode": 33},
-        "PageDown": {"key": "PageDown", "code": "PageDown", "keyCode": 34},
     }
     
     mapped = key_map.get(key, {"key": key, "code": code or f"Key{key.upper()}", "keyCode": ord(key.upper()) if len(key) == 1 else 0})
@@ -599,14 +525,12 @@ async def handle_key_event_cdp(session: BrowserSession, key: str, code: str, eve
         })
     except Exception as e:
         logger.debug(f"CDP key event error: {e}")
-        # Fallback to Playwright
         page = session.page
         if event_type == "keyDown":
             await page.keyboard.down(key)
         elif event_type == "keyUp":
             await page.keyboard.up(key)
 
-# Include the router in the main app
 app.include_router(api_router)
 
 app.add_middleware(
