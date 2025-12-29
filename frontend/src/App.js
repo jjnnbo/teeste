@@ -20,10 +20,10 @@ function App() {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
   const wsRef = useRef(null);
-  const imageRef = useRef(new Image());
   const inputRef = useRef(null);
   const frameCountRef = useRef(0);
   const lastFpsUpdateRef = useRef(Date.now());
+  const hasFramesRef = useRef(false);
   
   // Track actual canvas dimensions for precise coordinate mapping
   const canvasDimensionsRef = useRef({ width: 1280, height: 720 });
@@ -40,6 +40,33 @@ function App() {
   // Target URL
   const TARGET_URL = "https://pocketoption.com/en/login";
 
+  // Render frame to canvas
+  const renderFrame = useCallback((base64Data) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d', { alpha: false });
+    const img = new Image();
+    
+    img.onload = () => {
+      // Update canvas to match image exactly
+      if (canvas.width !== img.width || canvas.height !== img.height) {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        canvasDimensionsRef.current = { width: img.width, height: img.height };
+      }
+      ctx.drawImage(img, 0, 0);
+      
+      // Update hasFrames state
+      if (!hasFramesRef.current) {
+        hasFramesRef.current = true;
+        setHasFrames(true);
+      }
+    };
+    
+    img.src = `data:image/jpeg;base64,${base64Data}`;
+  }, []);
+
   // Create session
   const createSession = useCallback(async () => {
     setIsConnecting(true);
@@ -48,6 +75,8 @@ function App() {
     try {
       const { width, height } = getViewportSize();
       const url = `${API}/session/create?viewport_width=${width}&viewport_height=${height}&start_url=${encodeURIComponent(TARGET_URL)}`;
+      console.log('Creating session:', url);
+      
       const response = await fetch(url, {
         method: 'POST'
       });
@@ -57,8 +86,9 @@ function App() {
       }
       
       const data = await response.json();
+      console.log('Session created:', data);
       setSessionId(data.session_id);
-      toast.success("Sessão criada com sucesso!");
+      toast.success("Sessão criada!");
       return data.session_id;
     } catch (err) {
       console.error('Session creation error:', err);
@@ -80,9 +110,9 @@ function App() {
     wsRef.current = ws;
     
     ws.onopen = () => {
+      console.log('WebSocket connected!');
       setIsConnected(true);
       setIsConnecting(false);
-      console.log('WebSocket connected');
       
       // Send initial viewport size
       const { width, height } = getViewportSize();
@@ -97,8 +127,7 @@ function App() {
       try {
         const data = JSON.parse(event.data);
         
-        if (data.type === 'frame') {
-          if (!hasFrames) setHasFrames(true);
+        if (data.type === 'frame' && data.data) {
           renderFrame(data.data);
           
           // FPS counter
@@ -110,6 +139,7 @@ function App() {
             lastFpsUpdateRef.current = now;
           }
         } else if (data.type === 'error') {
+          console.error('Server error:', data.message);
           toast.error(data.message);
         }
       } catch (err) {
@@ -117,41 +147,21 @@ function App() {
       }
     };
     
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+      console.log('WebSocket disconnected:', event.code, event.reason);
       setIsConnected(false);
       setHasFrames(false);
-      console.log('WebSocket disconnected');
+      hasFramesRef.current = false;
     };
     
     ws.onerror = (err) => {
       console.error('WebSocket error:', err);
-      setError('Erro de conexão');
+      setError('Erro de conexão WebSocket');
       setIsConnected(false);
     };
-  }, [getViewportSize, hasFrames]);
+  }, [getViewportSize, renderFrame]);
 
-  // Render frame to canvas with exact dimensions
-  const renderFrame = useCallback((base64Data) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d', { alpha: false });
-    const img = imageRef.current;
-    
-    img.onload = () => {
-      // Update canvas to match image exactly
-      if (canvas.width !== img.width || canvas.height !== img.height) {
-        canvas.width = img.width;
-        canvas.height = img.height;
-        canvasDimensionsRef.current = { width: img.width, height: img.height };
-      }
-      ctx.drawImage(img, 0, 0);
-    };
-    
-    img.src = `data:image/jpeg;base64,${base64Data}`;
-  }, []);
-
-  // PRECISE coordinate calculation - critical for accurate clicks
+  // PRECISE coordinate calculation
   const getCoordinates = useCallback((e) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
@@ -160,15 +170,12 @@ function App() {
     const canvasWidth = canvasDimensionsRef.current.width;
     const canvasHeight = canvasDimensionsRef.current.height;
     
-    // Get the displayed size
     const displayWidth = rect.width;
     const displayHeight = rect.height;
     
-    // Calculate scale factors
     const scaleX = canvasWidth / displayWidth;
     const scaleY = canvasHeight / displayHeight;
     
-    // Get client coordinates
     let clientX, clientY;
     if (e.touches && e.touches.length > 0) {
       clientX = e.touches[0].clientX;
@@ -181,11 +188,9 @@ function App() {
       clientY = e.clientY;
     }
     
-    // Calculate precise coordinates
     const x = (clientX - rect.left) * scaleX;
     const y = (clientY - rect.top) * scaleY;
     
-    // Return with decimal precision for subpixel accuracy
     return {
       x: Math.max(0, Math.min(canvasWidth, x)),
       y: Math.max(0, Math.min(canvasHeight, y))
@@ -199,9 +204,9 @@ function App() {
     }
   }, []);
 
-  // Mouse handlers with debounced mousemove
+  // Mouse handlers
   const lastMoveRef = useRef(0);
-  const MOVE_THROTTLE = 16; // ~60fps for mouse move
+  const MOVE_THROTTLE = 32; // ~30fps for mouse move
   
   const handleMouseMove = useCallback((e) => {
     const now = Date.now();
@@ -235,7 +240,6 @@ function App() {
     console.log('Click at:', coords);
     sendEvent({ type: 'click', ...coords, button: 'left' });
     
-    // Focus hidden input for mobile keyboard
     if (inputRef.current) {
       inputRef.current.focus();
     }
@@ -266,7 +270,7 @@ function App() {
     });
   }, [getCoordinates, sendEvent]);
 
-  // Touch handlers with precise tracking
+  // Touch handlers
   const touchStartRef = useRef({ x: 0, y: 0, time: 0 });
   const lastTouchRef = useRef({ x: 0, y: 0 });
   
@@ -295,14 +299,12 @@ function App() {
     const startCoords = touchStartRef.current;
     const elapsed = Date.now() - startCoords.time;
     
-    // Calculate distance moved
     const dx = Math.abs(coords.x - startCoords.x);
     const dy = Math.abs(coords.y - startCoords.y);
     const distance = Math.sqrt(dx * dx + dy * dy);
     
     sendEvent({ type: 'mouseup', ...coords, button: 'left' });
     
-    // Only send click if it was a tap (short duration, small movement)
     if (elapsed < 300 && distance < 10) {
       sendEvent({ type: 'click', ...coords, button: 'left' });
     }
@@ -344,7 +346,7 @@ function App() {
     }
   }, [sendEvent]);
 
-  // Handle resize with debounce
+  // Handle resize
   useEffect(() => {
     let resizeTimeout;
     const handleResize = () => {
@@ -400,7 +402,10 @@ function App() {
     const init = async () => {
       const sid = await createSession();
       if (mounted && sid) {
-        connectWebSocket(sid);
+        // Small delay to ensure session is ready
+        setTimeout(() => {
+          connectWebSocket(sid);
+        }, 500);
       }
     };
     
@@ -422,12 +427,15 @@ function App() {
     setSessionId(null);
     setIsConnected(false);
     setHasFrames(false);
+    hasFramesRef.current = false;
     setIsConnecting(true);
     setFps(0);
     
     const sid = await createSession();
     if (sid) {
-      connectWebSocket(sid);
+      setTimeout(() => {
+        connectWebSocket(sid);
+      }, 500);
     }
   }, [createSession, connectWebSocket]);
 
@@ -506,7 +514,7 @@ function App() {
           </div>
         )}
         
-        {/* Browser Canvas - with precise event handling */}
+        {/* Browser Canvas */}
         <canvas
           ref={canvasRef}
           className="browser-canvas"
