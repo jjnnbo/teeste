@@ -227,31 +227,40 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     
     logger.info(f"WebSocket connected for session {session_id}")
     
-    # Start screenshot streaming task - more reliable than CDP screencast
+    # Start screenshot streaming task - optimized for low latency
     async def stream_screenshots():
-        fps_target = 30  # 30 FPS for good balance
+        fps_target = 20  # 20 FPS for stability over network
         frame_time = 1.0 / fps_target
+        error_count = 0
         
         while session.streaming:
             try:
                 start_time = asyncio.get_event_loop().time()
                 
                 if session.page and not session.page.is_closed():
-                    # Take screenshot with optimized settings
+                    # Take screenshot with lower quality for faster transfer
                     screenshot = await session.page.screenshot(
                         type="jpeg",
-                        quality=70,
+                        quality=50,  # Lower quality = smaller size = faster transfer
                         full_page=False,
-                        timeout=3000
+                        timeout=2000
                     )
                     screenshot_base64 = base64.b64encode(screenshot).decode('utf-8')
                     
                     if session.websocket:
-                        await session.websocket.send_json({
-                            "type": "frame",
-                            "data": screenshot_base64
-                        })
-                        session.frame_count += 1
+                        try:
+                            await session.websocket.send_json({
+                                "type": "frame",
+                                "data": screenshot_base64
+                            })
+                            session.frame_count += 1
+                            error_count = 0  # Reset on success
+                        except Exception as send_err:
+                            error_count += 1
+                            logger.warning(f"Failed to send frame: {send_err}")
+                            if error_count > 5:
+                                logger.error("Too many send errors, stopping stream")
+                                break
                 
                 # Calculate sleep time for target FPS
                 elapsed = asyncio.get_event_loop().time() - start_time
@@ -259,9 +268,13 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 await asyncio.sleep(sleep_time)
                 
             except WebSocketDisconnect:
+                logger.info("WebSocket disconnected during streaming")
                 break
             except Exception as e:
-                logger.debug(f"Stream frame error: {e}")
+                logger.warning(f"Stream frame error: {e}")
+                error_count += 1
+                if error_count > 10:
+                    break
                 await asyncio.sleep(0.1)
     
     session.stream_task = asyncio.create_task(stream_screenshots())
