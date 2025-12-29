@@ -204,9 +204,13 @@ function App() {
     }
   }, []);
 
-  // Mouse handlers
+  // Mouse handlers - optimized for natural clicks
   const lastMoveRef = useRef(0);
-  const MOVE_THROTTLE = 32; // ~30fps for mouse move
+  const lastClickRef = useRef(0);
+  const isMouseDownRef = useRef(false);
+  const mouseDownCoordsRef = useRef({ x: 0, y: 0 });
+  const MOVE_THROTTLE = 50; // Throttle mouse move
+  const CLICK_DEBOUNCE = 100; // Prevent double events
   
   const handleMouseMove = useCallback((e) => {
     const now = Date.now();
@@ -221,24 +225,32 @@ function App() {
     e.preventDefault();
     e.stopPropagation();
     const coords = getCoordinates(e);
-    const button = e.button === 2 ? 'right' : 'left';
-    sendEvent({ type: 'mousedown', ...coords, button });
-  }, [getCoordinates, sendEvent]);
+    isMouseDownRef.current = true;
+    mouseDownCoordsRef.current = coords;
+    // Don't send mousedown - we'll handle it in click for more natural behavior
+  }, [getCoordinates]);
 
   const handleMouseUp = useCallback((e) => {
     e.preventDefault();
     e.stopPropagation();
-    const coords = getCoordinates(e);
-    const button = e.button === 2 ? 'right' : 'left';
-    sendEvent({ type: 'mouseup', ...coords, button });
-  }, [getCoordinates, sendEvent]);
+    isMouseDownRef.current = false;
+    // Don't send mouseup - click event will handle everything
+  }, []);
 
   const handleClick = useCallback((e) => {
     e.preventDefault();
     e.stopPropagation();
+    
+    // Debounce clicks
+    const now = Date.now();
+    if (now - lastClickRef.current < CLICK_DEBOUNCE) return;
+    lastClickRef.current = now;
+    
     const coords = getCoordinates(e);
-    console.log('Click at:', coords);
-    sendEvent({ type: 'click', ...coords, button: 'left' });
+    const button = e.button === 2 ? 'right' : 'left';
+    
+    // Send single natural click event
+    sendEvent({ type: 'click', ...coords, button });
     
     if (inputRef.current) {
       inputRef.current.focus();
@@ -248,6 +260,10 @@ function App() {
   const handleDoubleClick = useCallback((e) => {
     e.preventDefault();
     e.stopPropagation();
+    
+    // Reset click debounce for double click
+    lastClickRef.current = 0;
+    
     const coords = getCoordinates(e);
     sendEvent({ type: 'dblclick', ...coords });
   }, [getCoordinates, sendEvent]);
